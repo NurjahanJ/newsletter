@@ -28,7 +28,6 @@ Thumbs.db
 .coverage
 htmlcov/
 
-# Output data
-output/
+
 
 .windsurf 
