@@ -9,7 +9,6 @@ import requests
 
 from eventbrite_extractor.config import (
     BASE_URL,
-    DEFAULT_LOCATION,
     DEFAULT_PAGE_SIZE,
     REQUEST_TIMEOUT,
     get_api_key,
@@ -18,12 +17,20 @@ from eventbrite_extractor.models import Event
 
 logger = logging.getLogger(__name__)
 
+# Fields to expand in the destination/search response
+_EXPAND_FIELDS = [
+    "primary_venue",
+    "image",
+    "primary_organizer",
+    "ticket_availability",
+]
+
 
 class EventbriteClient:
-    """Client for the Eventbrite API v3.
+    """Client for the Eventbrite destination/search API.
 
-    Handles authentication, event searching, pagination,
-    and rate limit retries.
+    Handles authentication, event searching, continuation-based
+    pagination, and rate limit retries.
     """
 
     def __init__(self, api_key: str | None = None):
@@ -42,20 +49,50 @@ class EventbriteClient:
             }
         )
 
-    def _request(self, endpoint: str, params: dict | None = None) -> dict:
-        """Make a GET request to the Eventbrite API.
+    def _post(self, endpoint: str, body: dict) -> dict:
+        """Make a POST request to the Eventbrite API.
 
-        Handles rate limiting with automatic retry.
+        Handles rate limiting with exponential backoff.
 
         Args:
-            endpoint: API endpoint path (e.g. "/events/search/").
-            params: Query parameters.
+            endpoint: API endpoint path.
+            body: JSON request body.
 
         Returns:
             Parsed JSON response as a dict.
 
         Raises:
             requests.HTTPError: If the request fails after retries.
+        """
+        url = f"{BASE_URL}{endpoint}"
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            response = self._session.post(url, json=body, timeout=REQUEST_TIMEOUT)
+
+            if response.status_code == 429:
+                wait = int(response.headers.get("Retry-After", 2**attempt))
+                logger.warning("Rate limited. Retrying in %d seconds...", wait)
+                time.sleep(wait)
+                continue
+
+            response.raise_for_status()
+            return response.json()
+
+        # Final attempt
+        response = self._session.post(url, json=body, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
+
+    def _get(self, endpoint: str, params: dict | None = None) -> dict:
+        """Make a GET request to the Eventbrite API.
+
+        Args:
+            endpoint: API endpoint path.
+            params: Query parameters.
+
+        Returns:
+            Parsed JSON response as a dict.
         """
         url = f"{BASE_URL}{endpoint}"
         max_retries = 3
@@ -72,7 +109,6 @@ class EventbriteClient:
             response.raise_for_status()
             return response.json()
 
-        # Final attempt without catching
         response = self._session.get(url, params=params, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         return response.json()
@@ -80,50 +116,47 @@ class EventbriteClient:
     def search_events(
         self,
         keyword: str,
-        location: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
+        online_only: bool = False,
         max_pages: int = 1,
         page_size: int = DEFAULT_PAGE_SIZE,
     ) -> list[Event]:
         """Search for public events on Eventbrite.
 
+        Uses the destination/search endpoint with POST and
+        continuation-based pagination.
+
         Args:
-            keyword: Search query (e.g. "python", "music").
-            location: Location to search near (e.g. "New York").
-                      Defaults to DEFAULT_LOCATION from config.
-            start_date: Filter events starting after this UTC datetime
-                        (ISO 8601 format, e.g. "2026-03-01T00:00:00Z").
-            end_date: Filter events starting before this UTC datetime.
-            max_pages: Maximum number of pages to fetch (for pagination).
+            keyword: Search query (e.g. "AI", "machine learning").
+            online_only: If True, only return online events.
+            max_pages: Maximum number of pages to fetch.
             page_size: Number of results per page (max 50).
 
         Returns:
             A list of Event objects.
         """
-        location = location or DEFAULT_LOCATION
-
-        params: dict = {
+        event_search: dict = {
             "q": keyword,
-            "location.address": location,
+            "dates": ["current_future"],
             "page_size": min(page_size, 50),
-            "expand": "venue,organizer,category,ticket_availability",
         }
 
-        if start_date:
-            params["start_date.range_start"] = start_date
-        if end_date:
-            params["start_date.range_end"] = end_date
+        if online_only:
+            event_search["online_events_only"] = True
+
+        body: dict = {
+            "event_search": event_search,
+            "expand.destination_event": _EXPAND_FIELDS,
+        }
 
         all_events: list[Event] = []
         seen_ids: set[str] = set()
 
         for page_num in range(1, max_pages + 1):
-            params["page"] = page_num
             logger.info("Fetching page %d...", page_num)
 
-            data = self._request("/events/search/", params=params)
-            raw_events = data.get("events", [])
+            data = self._post("/destination/search/", body=body)
+            events_data = data.get("events", {})
+            raw_events = events_data.get("results", [])
 
             if not raw_events:
                 logger.info("No more events found on page %d.", page_num)
@@ -135,11 +168,17 @@ class EventbriteClient:
                     seen_ids.add(event.event_id)
                     all_events.append(event)
 
-            # Check if there are more pages
-            pagination = data.get("pagination", {})
-            if page_num >= pagination.get("page_count", 1):
-                logger.info("Reached last page (%d).", page_num)
+            # Check for next page via continuation token
+            pagination = events_data.get("pagination", {})
+            continuation = pagination.get("continuation")
+
+            if not continuation:
+                logger.info("No more pages available.")
                 break
+
+            # Set continuation for next request
+            event_search["continuation"] = continuation
+            body["event_search"] = event_search
 
         logger.info("Extracted %d unique events.", len(all_events))
         return all_events
@@ -152,9 +191,9 @@ class EventbriteClient:
 
         Returns:
             An Event object.
+
+        Raises:
+            requests.HTTPError: If the event is not found.
         """
-        data = self._request(
-            f"/events/{event_id}/",
-            params={"expand": "venue,organizer,category,ticket_availability"},
-        )
+        data = self._get(f"/events/{event_id}/")
         return Event.from_api_response(data)

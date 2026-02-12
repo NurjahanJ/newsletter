@@ -6,34 +6,45 @@ import pytest
 
 from eventbrite_extractor.client import EventbriteClient
 
-# Sample API response for a single event
+# Sample event matching the real destination/search response format
 SAMPLE_EVENT = {
     "id": "111",
-    "name": {"text": "Sample Event"},
-    "description": {"text": "A sample event."},
-    "start": {"utc": "2026-04-01T10:00:00Z", "timezone": "UTC"},
-    "end": {"utc": "2026-04-01T12:00:00Z"},
-    "online_event": False,
-    "venue": {
+    "name": "AI Workshop",
+    "summary": "A workshop about AI.",
+    "start_date": "2026-04-01",
+    "start_time": "10:00",
+    "end_date": "2026-04-01",
+    "end_time": "12:00",
+    "timezone": "UTC",
+    "is_online_event": False,
+    "primary_venue": {
         "name": "Test Venue",
         "address": {"city": "Boston", "region": "MA", "country": "US"},
     },
-    "organizer": {"name": "Test Org"},
+    "primary_organizer": {"name": "Test Org", "id": "org1"},
     "url": "https://www.eventbrite.com/e/111",
-    "is_free": True,
-    "category": {"name": "Technology"},
-    "tags": [{"display_name": "python"}],
-    "logo": {"url": "https://img.example.com/logo.png"},
-    "capacity": 100,
+    "ticket_availability": {
+        "is_free": True,
+        "has_available_tickets": True,
+        "is_sold_out": False,
+    },
+    "tags": [
+        {
+            "prefix": "EventbriteCategory",
+            "display_name": "Science & Technology",
+        },
+    ],
+    "image": {"url": "https://img.example.com/logo.png"},
+    "published": "2026-01-10T08:00:00Z",
 }
 
 SAMPLE_SEARCH_RESPONSE = {
-    "events": [SAMPLE_EVENT],
-    "pagination": {
-        "page_number": 1,
-        "page_count": 1,
-        "page_size": 50,
-        "object_count": 1,
+    "events": {
+        "results": [SAMPLE_EVENT],
+        "pagination": {
+            "object_count": 1,
+            "page_size": 20,
+        },
     },
 }
 
@@ -45,62 +56,54 @@ class TestEventbriteClient:
         """Create a client with a fake API key."""
         return EventbriteClient(api_key="fake_token")
 
-    @patch("eventbrite_extractor.client.requests.Session")
-    def test_search_events_returns_events(self, mock_session_cls):
+    def test_search_events_returns_events(self):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = SAMPLE_SEARCH_RESPONSE
         mock_response.raise_for_status = MagicMock()
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session_cls.return_value = mock_session
-
         client = self._make_client()
-        client._session = mock_session
+        client._session = MagicMock()
+        client._session.post.return_value = mock_response
 
-        events = client.search_events(keyword="python", location="Boston")
+        events = client.search_events(keyword="AI")
         assert len(events) == 1
         assert events[0].event_id == "111"
-        assert events[0].title == "Sample Event"
-        assert events[0].location == "Boston, MA, US"
+        assert events[0].title == "AI Workshop"
+        assert events[0].venue_name == "Test Venue"
+        assert events[0].venue_address == "Boston, MA, US"
 
-    @patch("eventbrite_extractor.client.requests.Session")
-    def test_search_events_deduplicates(self, mock_session_cls):
-        """Duplicate events across pages should be deduplicated."""
-        response_page = {
-            "events": [SAMPLE_EVENT, SAMPLE_EVENT],
-            "pagination": {
-                "page_number": 1,
-                "page_count": 1,
-                "page_size": 50,
-                "object_count": 2,
+    def test_search_events_deduplicates(self):
+        """Duplicate events in results should be deduplicated."""
+        response = {
+            "events": {
+                "results": [SAMPLE_EVENT, SAMPLE_EVENT],
+                "pagination": {
+                    "object_count": 2,
+                    "page_size": 20,
+                },
             },
         }
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = response_page
+        mock_response.json.return_value = response
         mock_response.raise_for_status = MagicMock()
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session_cls.return_value = mock_session
-
         client = self._make_client()
-        client._session = mock_session
+        client._session = MagicMock()
+        client._session.post.return_value = mock_response
 
-        events = client.search_events(keyword="python")
+        events = client.search_events(keyword="AI")
         assert len(events) == 1
 
-    @patch("eventbrite_extractor.client.requests.Session")
-    def test_search_events_empty_response(self, mock_session_cls):
+    def test_search_events_empty_response(self):
         empty_response = {
-            "events": [],
-            "pagination": {
-                "page_number": 1,
-                "page_count": 1,
-                "page_size": 50,
-                "object_count": 0,
+            "events": {
+                "results": [],
+                "pagination": {
+                    "object_count": 0,
+                    "page_size": 20,
+                },
             },
         }
         mock_response = MagicMock()
@@ -108,33 +111,68 @@ class TestEventbriteClient:
         mock_response.json.return_value = empty_response
         mock_response.raise_for_status = MagicMock()
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session_cls.return_value = mock_session
-
         client = self._make_client()
-        client._session = mock_session
+        client._session = MagicMock()
+        client._session.post.return_value = mock_response
 
         events = client.search_events(keyword="nonexistent")
         assert len(events) == 0
 
-    @patch("eventbrite_extractor.client.requests.Session")
-    def test_get_event_by_id(self, mock_session_cls):
+    def test_search_events_pagination(self):
+        """Test that continuation-based pagination works."""
+        page1 = {
+            "events": {
+                "results": [SAMPLE_EVENT],
+                "pagination": {
+                    "object_count": 2,
+                    "page_size": 1,
+                    "continuation": "eyJwYWdlIjoyfQ",
+                },
+            },
+        }
+        event2 = {**SAMPLE_EVENT, "id": "222", "name": "AI Talk"}
+        page2 = {
+            "events": {
+                "results": [event2],
+                "pagination": {
+                    "object_count": 2,
+                    "page_size": 1,
+                },
+            },
+        }
+
+        mock_resp1 = MagicMock()
+        mock_resp1.status_code = 200
+        mock_resp1.json.return_value = page1
+        mock_resp1.raise_for_status = MagicMock()
+
+        mock_resp2 = MagicMock()
+        mock_resp2.status_code = 200
+        mock_resp2.json.return_value = page2
+        mock_resp2.raise_for_status = MagicMock()
+
+        client = self._make_client()
+        client._session = MagicMock()
+        client._session.post.side_effect = [mock_resp1, mock_resp2]
+
+        events = client.search_events(keyword="AI", max_pages=2)
+        assert len(events) == 2
+        assert events[0].event_id == "111"
+        assert events[1].event_id == "222"
+
+    def test_get_event_by_id(self):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = SAMPLE_EVENT
         mock_response.raise_for_status = MagicMock()
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_response
-        mock_session_cls.return_value = mock_session
-
         client = self._make_client()
-        client._session = mock_session
+        client._session = MagicMock()
+        client._session.get.return_value = mock_response
 
         event = client.get_event_by_id("111")
         assert event.event_id == "111"
-        assert event.title == "Sample Event"
+        assert event.title == "AI Workshop"
 
     def test_client_requires_api_key(self):
         with (

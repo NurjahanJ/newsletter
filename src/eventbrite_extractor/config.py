@@ -29,6 +29,5 @@ def get_api_key() -> str:
 BASE_URL = "https://www.eventbriteapi.com/v3"
 
 # Default settings
-DEFAULT_PAGE_SIZE = 50
-DEFAULT_LOCATION = "New York"
+DEFAULT_PAGE_SIZE = 20
 REQUEST_TIMEOUT = 30
