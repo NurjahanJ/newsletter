@@ -28,6 +28,6 @@ Thumbs.db
 .coverage
 htmlcov/
 
-
-
-.windsurf 
+# Tools
+.ruff_cache/
+.windsurf/
