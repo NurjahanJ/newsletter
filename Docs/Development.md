@@ -6,11 +6,12 @@
 pytest tests/ -v
 ```
 
-The test suite includes 25 tests covering:
+The test suite includes 62 tests covering:
 
 - **Model tests** — Event creation, API response parsing, serialization
 - **Client tests** — Search, pagination, deduplication, location filtering
 - **Export tests** — JSON and CSV file output
+- **Transform tests** — Filtering, sorting, price/date formatting, classification, full pipeline
 
 ## Linting and Formatting
 
@@ -42,9 +43,17 @@ src/eventbrite_extractor/
 ├── config.py           # Loads .env, defines constants (API URL, NYC place ID)
 ├── models.py           # Event dataclass with from_api_response() factory
 ├── client.py           # EventbriteClient — POST to destination/search API
+├── transform.py        # Filter, sort, enrich, classify events
 ├── export.py           # export_to_json() and export_to_csv()
-├── extract_events.py   # CLI entry point with argparse
+├── extract_events.py   # CLI entry point (Extract → Transform → Export)
 └── __init__.py         # Public API exports
+```
+
+### ETL Pipeline
+
+```
+Extract (client.py)  →  Transform (transform.py)  →  Export (export.py)
+  Eventbrite API          Filter, sort, enrich        JSON / CSV files
 ```
 
 ### Key Design Decisions
@@ -54,3 +63,5 @@ src/eventbrite_extractor/
 - **Place IDs** — Location filtering uses Who's On First place IDs (e.g. `85977539` for NYC).
 - **Rate limit handling** — Automatic retry with exponential backoff on HTTP 429 responses.
 - **Deduplication** — Events are deduplicated by ID across pages.
+- **Keyword-based classification** — Events are classified into types (Conference, Workshop, Meetup, etc.) by scanning title, summary, and tags for known keywords.
+- **Cross-platform date formatting** — Avoids platform-specific strftime flags (`%-d` vs `%#d`).

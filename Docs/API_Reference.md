@@ -115,21 +115,64 @@ export_to_csv(events, "output/events.csv")
 
 ---
 
+## Transform
+
+### `transform_events(events, remove_cancelled=True, remove_past=True, sort_by="date", free_first=False, reference_date=None)`
+
+Run the full transform pipeline: filter, sort, and enrich events.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `events` | `list[Event]` | *(required)* | Raw Event objects |
+| `remove_cancelled` | `bool` | `True` | Drop cancelled events |
+| `remove_past` | `bool` | `True` | Drop events before today |
+| `sort_by` | `str` | `"date"` | `"date"` or `"title"` |
+| `free_first` | `bool` | `False` | Free events appear first |
+| `reference_date` | `date \| None` | `None` (today) | Date for past-event filtering |
+
+**Returns:** `list[dict]` — Enriched event dicts with extra fields:
+
+| Extra Field | Example |
+|-------------|---------|
+| `display_price` | `"Free"`, `"$50 USD"` |
+| `display_date` | `"Wed, Mar 4 at 10:00 AM"` |
+| `display_location` | `"Google NYC - Pier 57"`, `"Online"` |
+| `event_type` | `"Workshop"`, `"Conference"`, `"Meetup"`, `"Talk"`, etc. |
+
+### Helper Functions
+
+These are also available individually:
+
+- **`filter_events(events, ...)`** — Remove cancelled / past events
+- **`sort_events(events, by, free_first)`** — Sort by date or title
+- **`format_price(event)`** — `"Free"`, `"$50 USD"`, `"Paid"`
+- **`format_date_display(event)`** — `"Wed, Mar 4 at 10:00 AM"`
+- **`format_location(event)`** — `"Online"`, venue name, or `"Location TBD"`
+- **`classify_event(event)`** — Conference, Workshop, Meetup, Webinar, Hackathon, Talk, Course, or Event
+
+---
+
 ## Full Example
 
 ```python
-from eventbrite_extractor import EventbriteClient, export_to_json, export_to_csv
+from eventbrite_extractor import EventbriteClient, transform_events, export_to_json, export_to_csv
 
 client = EventbriteClient()
 
-# Search for AI events in NYC
+# Extract
 events = client.search_events(keyword="AI", max_pages=3)
 
-# Export
+# Transform
+enriched = transform_events(events, free_first=True)
+
+# Export raw events
 export_to_json(events, "output/events.json")
 export_to_csv(events, "output/events.csv")
 
-# Print results
-for event in events:
-    print(f"{event.title} — {event.start_date} — {event.url}")
+# Use enriched data
+for ev in enriched:
+    print(f"[{ev['event_type']}] {ev['title']}")
+    print(f"  {ev['display_date']} · {ev['display_location']} · {ev['display_price']}")
 ```

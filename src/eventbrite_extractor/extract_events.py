@@ -1,16 +1,14 @@
-"""CLI script to extract and transform AI events from Eventbrite."""
+"""CLI script to extract AI events from Eventbrite for the newsletter."""
 
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import sys
-from pathlib import Path
 
 from eventbrite_extractor.client import EventbriteClient
 from eventbrite_extractor.config import NYC_PLACE_ID
+from eventbrite_extractor.export import export_to_csv, export_to_json
 from eventbrite_extractor.transform import transform_events
 
 logging.basicConfig(
@@ -20,36 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _save_json(data: list[dict], filepath: Path) -> None:
-    """Write transformed event dicts to JSON."""
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    logger.info("JSON saved to %s", filepath)
-
-
-def _save_csv(data: list[dict], filepath: Path) -> None:
-    """Write transformed event dicts to CSV."""
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    if not data:
-        filepath.write_text("", encoding="utf-8")
-        return
-    fieldnames = list(data[0].keys())
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in data:
-            row = dict(row)
-            if isinstance(row.get("tags"), list):
-                row["tags"] = ", ".join(row["tags"])
-            writer.writerow(row)
-    logger.info("CSV saved to %s", filepath)
-
-
 def main(argv: list[str] | None = None) -> None:
-    """Run the extract + transform pipeline."""
+    """Run the event extraction pipeline."""
     parser = argparse.ArgumentParser(
-        description="Extract and transform AI events from Eventbrite.",
+        description="Extract AI events from Eventbrite for newsletter use.",
     )
     parser.add_argument(
         "-q",
@@ -81,6 +53,17 @@ def main(argv: list[str] | None = None) -> None:
         help="Only include online events.",
     )
     parser.add_argument(
+        "--sort-by",
+        choices=["date", "title"],
+        default="date",
+        help="Sort events by 'date' or 'title' (default: date).",
+    )
+    parser.add_argument(
+        "--free-first",
+        action="store_true",
+        help="Show free events before paid events.",
+    )
+    parser.add_argument(
         "--format",
         choices=["json", "csv", "both"],
         default="both",
@@ -98,7 +81,6 @@ def main(argv: list[str] | None = None) -> None:
     place_id = None if args.place_id.lower() == "none" else args.place_id
     location_label = "NYC" if place_id == NYC_PLACE_ID else (place_id or "worldwide")
 
-    # ── Extract ──────────────────────────────────────────────────
     logger.info(
         "Searching Eventbrite for '%s' events in %s (max %d pages)...",
         args.query,
@@ -107,7 +89,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     client = EventbriteClient()
-    raw_events = client.search_events(
+    events = client.search_events(
         keyword=args.query,
         place_id=place_id,
         online_only=args.online_only,
@@ -115,35 +97,47 @@ def main(argv: list[str] | None = None) -> None:
         page_size=args.page_size,
     )
 
-    if not raw_events:
+    if not events:
         logger.warning("No events found for query '%s'.", args.query)
         sys.exit(0)
 
-    # ── Transform ────────────────────────────────────────────────
-    events = transform_events(raw_events)
+    logger.info("Found %d raw events. Transforming...", len(events))
 
-    if not events:
-        logger.warning("No events remaining after transform.")
+    # --- Transform ---
+    enriched = transform_events(
+        events,
+        sort_by=args.sort_by,
+        free_first=args.free_first,
+    )
+
+    if not enriched:
+        logger.warning("No events remaining after filtering.")
         sys.exit(0)
 
-    # ── Export ────────────────────────────────────────────────────
-    output_dir = Path(args.output_dir)
+    logger.info("%d events after transform. Exporting...", len(enriched))
+
+    # --- Export (enriched dicts) ---
+    output_dir = args.output_dir
     if args.format in ("json", "both"):
-        _save_json(events, output_dir / "events.json")
+        path = export_to_json(events, f"{output_dir}/events.json")
+        logger.info("JSON saved to %s", path)
 
     if args.format in ("csv", "both"):
-        _save_csv(events, output_dir / "events.csv")
+        path = export_to_csv(events, f"{output_dir}/events.csv")
+        logger.info("CSV saved to %s", path)
 
-    # ── Summary ──────────────────────────────────────────────────
+    # --- Print summary ---
     print(f"\n{'=' * 64}")
-    print(f"  {len(events)} AI events in {location_label} (from Eventbrite)")
+    print(f"  {len(enriched)} AI events in {location_label} (from {len(events)} raw)")
     print(f"{'=' * 64}\n")
-    for i, event in enumerate(events, 1):
-        print(f"  {i}. [{event['event_type']}] {event['title']}")
-        print(f"     {event['display_date']}")
-        print(f"     Location: {event['location']}")
-        print(f"     Price: {event['display_price']}")
-        print(f"     {event['url']}")
+
+    for i, ev in enumerate(enriched, 1):
+        tag = ev["event_type"]
+        print(f"  {i}. [{tag}] {ev['title']}")
+        print(f"     {ev['display_date']}")
+        print(f"     {ev['display_location']}")
+        print(f"     {ev['display_price']}")
+        print(f"     {ev['url']}")
         print()
 
 

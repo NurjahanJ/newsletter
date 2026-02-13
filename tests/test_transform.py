@@ -1,4 +1,4 @@
-"""Tests for the transform pipeline."""
+"""Tests for the transform module."""
 
 from __future__ import annotations
 
@@ -6,208 +6,267 @@ from datetime import date
 
 from eventbrite_extractor.models import Event
 from eventbrite_extractor.transform import (
-    classify_event_type,
-    clean_tags,
-    deduplicate,
-    filter_cancelled,
-    filter_past_events,
-    format_display_date,
-    normalize_pricing,
+    classify_event,
+    filter_events,
+    format_date_display,
+    format_location,
+    format_price,
+    sort_events,
     transform_events,
 )
 
 
-def _make_event(**overrides) -> Event:
-    """Create a test event with sensible defaults."""
+def _event(**kwargs) -> Event:
+    """Create an Event with sensible defaults, overridden by kwargs."""
     defaults = {
         "event_id": "1",
         "title": "AI Workshop",
-        "start_date": "2026-06-01",
+        "start_date": "2026-03-15",
         "start_time": "10:00",
-        "end_date": "2026-06-01",
-        "end_time": "12:00",
-        "timezone": "America/New_York",
     }
-    defaults.update(overrides)
+    defaults.update(kwargs)
     return Event(**defaults)
 
 
-class TestFilterCancelled:
+class TestFilterEvents:
+    """Tests for filter_events."""
+
     def test_removes_cancelled(self):
-        events = [_make_event(), _make_event(event_id="2", is_cancelled=True)]
-        result = filter_cancelled(events)
+        events = [_event(), _event(event_id="2", is_cancelled=True)]
+        result = filter_events(events, reference_date=date(2026, 1, 1))
         assert len(result) == 1
         assert result[0].event_id == "1"
 
-    def test_keeps_all_if_none_cancelled(self):
-        events = [_make_event(), _make_event(event_id="2")]
-        assert len(filter_cancelled(events)) == 2
+    def test_keeps_cancelled_when_disabled(self):
+        events = [_event(is_cancelled=True)]
+        result = filter_events(
+            events, remove_cancelled=False, reference_date=date(2026, 1, 1)
+        )
+        assert len(result) == 1
 
-
-class TestFilterPastEvents:
     def test_removes_past_events(self):
         events = [
-            _make_event(start_date="2020-01-01"),
-            _make_event(event_id="2", start_date="2030-01-01"),
+            _event(event_id="past", start_date="2025-01-01"),
+            _event(event_id="future", start_date="2026-06-01"),
         ]
-        result = filter_past_events(events, cutoff=date(2025, 1, 1))
+        result = filter_events(events, reference_date=date(2026, 3, 1))
         assert len(result) == 1
-        assert result[0].event_id == "2"
+        assert result[0].event_id == "future"
 
-    def test_keeps_events_on_cutoff_date(self):
-        events = [_make_event(start_date="2026-03-01")]
-        result = filter_past_events(events, cutoff=date(2026, 3, 1))
-        assert len(result) == 1
-
-    def test_keeps_events_without_date(self):
-        events = [_make_event(start_date=None)]
-        result = filter_past_events(events, cutoff=date(2026, 1, 1))
+    def test_keeps_past_when_disabled(self):
+        events = [_event(start_date="2020-01-01")]
+        result = filter_events(
+            events, remove_past=False, reference_date=date(2026, 3, 1)
+        )
         assert len(result) == 1
 
+    def test_keeps_events_with_no_date(self):
+        events = [_event(start_date=None)]
+        result = filter_events(events, reference_date=date(2026, 3, 1))
+        assert len(result) == 1
 
-class TestDeduplicate:
-    def test_removes_duplicates(self):
-        events = [_make_event(), _make_event(), _make_event(event_id="2")]
-        result = deduplicate(events)
-        assert len(result) == 2
+    def test_keeps_todays_events(self):
+        events = [_event(start_date="2026-03-01")]
+        result = filter_events(events, reference_date=date(2026, 3, 1))
+        assert len(result) == 1
 
-    def test_preserves_order(self):
+
+class TestSortEvents:
+    """Tests for sort_events."""
+
+    def test_sort_by_date(self):
         events = [
-            _make_event(event_id="a"),
-            _make_event(event_id="b"),
-            _make_event(event_id="a"),
+            _event(event_id="b", start_date="2026-04-01"),
+            _event(event_id="a", start_date="2026-03-01"),
         ]
-        result = deduplicate(events)
-        assert [e.event_id for e in result] == ["a", "b"]
+        result = sort_events(events, by="date")
+        assert result[0].event_id == "a"
+        assert result[1].event_id == "b"
+
+    def test_sort_by_title(self):
+        events = [
+            _event(event_id="z", title="Zebra Talk"),
+            _event(event_id="a", title="AI Workshop"),
+        ]
+        result = sort_events(events, by="title")
+        assert result[0].event_id == "a"
+        assert result[1].event_id == "z"
+
+    def test_free_first(self):
+        events = [
+            _event(event_id="paid", is_free=False, start_date="2026-03-01"),
+            _event(event_id="free", is_free=True, start_date="2026-04-01"),
+        ]
+        result = sort_events(events, by="date", free_first=True)
+        assert result[0].event_id == "free"
+        assert result[1].event_id == "paid"
+
+    def test_none_dates_sort_last(self):
+        events = [
+            _event(event_id="none", start_date=None),
+            _event(event_id="dated", start_date="2026-03-01"),
+        ]
+        result = sort_events(events, by="date")
+        assert result[0].event_id == "dated"
+        assert result[1].event_id == "none"
 
 
-class TestNormalizePricing:
-    def test_zero_price_becomes_free(self):
-        event = _make_event(is_free=False, price="0.00", currency="USD")
-        normalize_pricing(event)
-        assert event.is_free is True
-        assert event.price is None
-        assert event.currency is None
+class TestFormatPrice:
+    """Tests for format_price."""
 
-    def test_free_event_clears_price(self):
-        event = _make_event(is_free=True, price="10.00", currency="USD")
-        normalize_pricing(event)
-        assert event.price is None
+    def test_free_event(self):
+        assert format_price(_event(is_free=True)) == "Free"
 
-    def test_paid_event_gets_symbol(self):
-        event = _make_event(is_free=False, price="25.00", currency="USD")
-        normalize_pricing(event)
-        assert event.price == "$25.00"
+    def test_priced_event(self):
+        result = format_price(_event(price="50.00", currency="USD"))
+        assert result == "$50 USD"
 
-    def test_eur_symbol(self):
-        event = _make_event(is_free=False, price="50.00", currency="EUR")
-        normalize_pricing(event)
-        assert event.price == "€50.00"
+    def test_priced_event_with_cents(self):
+        result = format_price(_event(price="5.04", currency="USD"))
+        assert result == "$5.04 USD"
 
-    def test_unknown_currency_uses_code(self):
-        event = _make_event(is_free=False, price="100.00", currency="JPY")
-        normalize_pricing(event)
-        assert event.price == "JPY 100.00"
+    def test_zero_price_is_free(self):
+        result = format_price(_event(price="0.00", currency="USD"))
+        assert result == "Free"
+
+    def test_no_price_shows_paid(self):
+        assert format_price(_event(is_free=False, price=None)) == "Paid"
+
+    def test_default_currency(self):
+        result = format_price(_event(price="25.00", currency=None))
+        assert result == "$25 USD"
 
 
-class TestFormatDisplayDate:
-    def test_formats_date_and_time(self):
-        event = _make_event(start_date="2026-03-01", start_time="14:00")
-        result = format_display_date(event)
-        assert result == "Sun, Mar 01, 2026 at 02:00 PM"
+class TestFormatDateDisplay:
+    """Tests for format_date_display."""
 
-    def test_no_time_defaults_to_midnight(self):
-        event = _make_event(start_date="2026-03-01", start_time=None)
-        result = format_display_date(event)
-        assert "12:00 AM" in result
+    def test_full_date_and_time(self):
+        result = format_date_display(
+            _event(start_date="2026-03-04", start_time="10:00")
+        )
+        assert result == "Wed, Mar 4 at 10:00 AM"
 
-    def test_no_date_returns_none(self):
-        event = _make_event(start_date=None)
-        assert format_display_date(event) is None
+    def test_afternoon_time(self):
+        result = format_date_display(
+            _event(start_date="2026-03-04", start_time="14:30")
+        )
+        assert result == "Wed, Mar 4 at 2:30 PM"
+
+    def test_midnight(self):
+        result = format_date_display(
+            _event(start_date="2026-03-04", start_time="00:00")
+        )
+        assert result == "Wed, Mar 4 at 12:00 AM"
+
+    def test_date_only(self):
+        result = format_date_display(_event(start_date="2026-03-04", start_time=None))
+        assert result == "Wed, Mar 4"
+
+    def test_no_date_or_time(self):
+        result = format_date_display(_event(start_date=None, start_time=None))
+        assert result == "Date TBD"
 
 
-class TestCleanTags:
-    def test_removes_duplicate_tags(self):
-        event = _make_event(tags=["Science", "Tech", "science", "AI"])
-        clean_tags(event)
-        assert len(event.tags) == 3
-        assert "Science" in event.tags
-        assert "AI" in event.tags
+class TestFormatLocation:
+    """Tests for format_location."""
 
-    def test_preserves_original_casing(self):
-        event = _make_event(tags=["Machine Learning", "machine learning"])
-        clean_tags(event)
-        assert event.tags == ["Machine Learning"]
+    def test_online(self):
+        assert format_location(_event(is_online=True)) == "Online"
+
+    def test_venue(self):
+        assert format_location(_event(venue_name="Grand Hall")) == "Grand Hall"
+
+    def test_no_location(self):
+        event = _event(is_online=False, venue_name=None)
+        assert format_location(event) == "Location TBD"
 
 
-class TestClassifyEventType:
+class TestClassifyEvent:
+    """Tests for classify_event."""
+
     def test_conference(self):
-        event = _make_event(title="AI Summit 2026", tags=["Conference"])
-        assert classify_event_type(event) == "Conference"
+        assert classify_event(_event(title="AI Summit 2026")) == "Conference"
 
     def test_workshop(self):
-        event = _make_event(title="Hands-On AI Workshop")
-        assert classify_event_type(event) == "Workshop"
+        assert classify_event(_event(title="Hands-On AI Workshop")) == "Workshop"
 
     def test_meetup(self):
-        event = _make_event(title="AI Networking Mixer", tags=["Meetup"])
-        assert classify_event_type(event) == "Meetup"
+        assert classify_event(_event(title="AI Networking Mixer")) == "Meetup"
 
-    def test_seminar_from_tags(self):
-        event = _make_event(title="AI Event", tags=["Seminar or Talk"])
-        assert classify_event_type(event) == "Seminar"
+    def test_webinar(self):
+        assert classify_event(_event(title="AI Webinar Series")) == "Webinar"
 
     def test_hackathon(self):
-        event = _make_event(title="AI Hackathon NYC")
-        assert classify_event_type(event) == "Hackathon"
+        assert classify_event(_event(title="AI Hackathon NYC")) == "Hackathon"
+
+    def test_talk(self):
+        assert classify_event(_event(title="Keynote: Future of AI")) == "Talk"
 
     def test_course(self):
-        event = _make_event(title="AI Certification Course")
-        assert classify_event_type(event) == "Course"
+        assert classify_event(_event(title="AI Fundamentals Course")) == "Course"
 
-    def test_default_event(self):
-        event = _make_event(title="Something About AI", tags=[])
-        assert classify_event_type(event) == "Event"
+    def test_fallback(self):
+        assert classify_event(_event(title="AI and Philosophy")) == "Event"
+
+    def test_uses_summary(self):
+        event = _event(title="Something", summary="Join our networking mixer")
+        assert classify_event(event) == "Meetup"
+
+    def test_uses_tags(self):
+        event = _event(title="Something", tags=["Workshop"])
+        assert classify_event(event) == "Workshop"
 
 
-class TestTransformPipeline:
+class TestTransformEvents:
+    """Tests for the full transform_events pipeline."""
+
     def test_full_pipeline(self):
         events = [
-            _make_event(
+            _event(
                 event_id="1",
-                start_date="2026-06-01",
-                is_cancelled=False,
-                is_free=False,
-                price="0.00",
-                currency="USD",
-                tags=["Science", "science", "AI"],
+                title="AI Summit",
+                start_date="2026-04-01",
+                start_time="09:00",
+                is_free=True,
             ),
-            _make_event(event_id="2", is_cancelled=True),
-            _make_event(event_id="1"),  # duplicate
-            _make_event(event_id="3", start_date="2020-01-01"),  # past
+            _event(
+                event_id="2",
+                title="AI Workshop",
+                start_date="2026-03-15",
+                start_time="14:00",
+                is_free=False,
+                price="50.00",
+                currency="USD",
+            ),
+            _event(event_id="3", is_cancelled=True),
         ]
-        result = transform_events(events, cutoff=date(2025, 1, 1))
+        result = transform_events(events, reference_date=date(2026, 1, 1))
 
-        assert len(result) == 1
-        assert result[0]["event_id"] == "1"
-        assert result[0]["display_price"] == "Free"
+        # Cancelled event filtered out
+        assert len(result) == 2
+
+        # Sorted by date — March before April
+        assert result[0]["event_id"] == "2"
+        assert result[1]["event_id"] == "1"
+
+        # Enriched fields present
+        assert result[0]["display_price"] == "$50 USD"
+        assert result[0]["display_date"] == "Sun, Mar 15 at 2:00 PM"
         assert result[0]["event_type"] == "Workshop"
-        assert "display_date" in result[0]
-        assert "location" in result[0]
+        assert result[1]["display_price"] == "Free"
+        assert result[1]["event_type"] == "Conference"
 
-    def test_sorts_by_date(self):
+    def test_free_first_sorting(self):
         events = [
-            _make_event(event_id="b", start_date="2026-09-01"),
-            _make_event(event_id="a", start_date="2026-03-01"),
+            _event(event_id="paid", start_date="2026-03-01", is_free=False),
+            _event(event_id="free", start_date="2026-04-01", is_free=True),
         ]
-        result = transform_events(events, cutoff=date(2025, 1, 1))
-        assert result[0]["event_id"] == "a"
-        assert result[1]["event_id"] == "b"
+        result = transform_events(
+            events,
+            free_first=True,
+            reference_date=date(2026, 1, 1),
+        )
+        assert result[0]["event_id"] == "free"
 
-    def test_enriched_fields_present(self):
-        events = [_make_event(is_online=True, is_free=True)]
-        result = transform_events(events, cutoff=date(2025, 1, 1))
-        assert result[0]["location"] == "Online"
-        assert result[0]["display_price"] == "Free"
-        assert result[0]["event_type"] is not None
-        assert result[0]["display_date"] is not None
+    def test_empty_input(self):
+        assert transform_events([]) == []
