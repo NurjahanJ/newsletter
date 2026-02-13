@@ -134,7 +134,7 @@ class TestRenderNewsletter:
     def test_empty_events(self):
         html = render_newsletter([])
         assert "<!DOCTYPE html>" in html
-        assert "0 upcoming AI events" in html
+        assert "0 upcoming AI events" in html or "curated 0" in html.lower()
 
 
 class TestRenderNewsletterToFile:

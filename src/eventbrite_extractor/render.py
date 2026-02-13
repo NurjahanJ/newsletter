@@ -78,9 +78,30 @@ def render_newsletter(
         subtitle = today.strftime("%B %Y")
 
     if intro_text is None:
+        # Count free events and event types for a richer intro
+        free_count = sum(
+            1 for e in enriched_events if e.get("display_price") == "Free"
+        )
+        groups = _group_events(enriched_events)
+        type_names = [g["type"].lower() + "s" for g in groups]
+
+        types_str = (
+            ", ".join(type_names[:-1]) + f", and {type_names[-1]}"
+            if len(type_names) > 1
+            else type_names[0] if type_names else "events"
+        )
+
+        free_note = (
+            f" {free_count} of them are completely free."
+            if free_count
+            else ""
+        )
+
         intro_text = (
-            f"Here are {len(enriched_events)} upcoming AI events "
-            f"we found for you this week. Happy networking!"
+            f"We've curated {len(enriched_events)} upcoming AI events "
+            f"in New York City for you — spanning {types_str}. "
+            f"Whether you're looking to learn, build, or connect with "
+            f"the AI community, there's something here for you.{free_note}"
         )
 
     event_groups = _group_events(enriched_events)
