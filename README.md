@@ -2,6 +2,8 @@
 
 A Python package that extracts, transforms, and exports public event data from Eventbrite — focused on **AI events in New York City**.
 
+**Python 3.9+** · **62 tests** · **Linted with Ruff**
+
 ## Features
 
 - Search events by keyword and location (default: AI events in NYC)
@@ -35,18 +37,53 @@ Extract (client.py)  →  Transform (transform.py)  →  Export (export.py)
 2. **Transform** — Filters cancelled/past events, sorts, and enriches with display-ready fields
 3. **Export** — Saves structured data to JSON and/or CSV
 
+## Sample Output
+
+Running the default extraction produces a terminal summary like this:
+
+```
+================================================================
+  56 events in NYC (from 56 raw)
+================================================================
+
+  1. [Talk] AI Search and News
+     Wed, Feb 19 at 12:00 PM
+     Lecture Hall, Columbia Journalism School
+     Free
+     https://www.eventbrite.com/e/ai-search-and-news-tickets-1981061406997
+
+  2. [Meetup] AI x Wellness x Tech Mixer: Tools, Habits & Human Connection
+     Wed, Feb 19 at 6:00 PM
+     The Lobby Bar & Garden
+     $17.85 USD
+     https://www.eventbrite.com/e/...
+```
+
+Output files are saved to `output/events.json` and `output/events.csv`.
+
 ## Project Structure
 
 ```
-├── Docs/                              # Documentation
-│   ├── Project_Info.md                # Project overview, goals, and scope
-│   ├── Setup.md                       # Installation and API key setup
-│   ├── CLI_Usage.md                   # CLI options and examples
-│   ├── API_Reference.md              # Python API and Event fields
-│   └── Development.md                # Testing, linting, architecture
 ├── src/eventbrite_extractor/          # Package source code
-├── tests/                             # Test suite
-├── output/                            # Extracted data (JSON, CSV)
+│   ├── __init__.py                    #   Public API exports
+│   ├── config.py                      #   Environment config and constants
+│   ├── models.py                      #   Event dataclass (23 fields)
+│   ├── client.py                      #   Eventbrite API client
+│   ├── transform.py                   #   Filter, sort, enrich, classify
+│   ├── export.py                      #   JSON and CSV export
+│   └── extract_events.py             #   CLI entry point
+├── tests/                             # 62 tests across 4 modules
+│   ├── test_models.py                 #   Event creation and parsing
+│   ├── test_client.py                 #   API search, pagination, dedup
+│   ├── test_export.py                 #   JSON/CSV file output
+│   └── test_transform.py             #   Filter, sort, format, classify
+├── Docs/                              # Documentation
+│   ├── Project_Info.md                #   Project overview and scope
+│   ├── Setup.md                       #   Installation and API key setup
+│   ├── CLI_Usage.md                   #   CLI options and examples
+│   ├── API_Reference.md              #   Python API reference
+│   └── Development.md                #   Testing, linting, architecture
+├── output/                            # Sample extracted data (JSON, CSV)
 ├── .env.example                       # Environment variable template
 ├── pyproject.toml                     # Build config and Ruff settings
 └── requirements.txt                   # Python dependencies

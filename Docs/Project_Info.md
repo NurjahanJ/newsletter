@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project is a Python package that extracts public event data from Eventbrite. It implements a complete **Extract → Transform → Export** pipeline focused on collecting, enriching, and exporting structured event data.
+This project is a Python package (Python 3.9+) that extracts public event data from Eventbrite. It implements a complete **Extract → Transform → Export** pipeline focused on collecting, enriching, and exporting structured event data.
 
 ## Project Goals
 
@@ -61,22 +61,30 @@ Extract (client.py)  →  Transform (transform.py)  →  Export (export.py)
 
 ## Data Fields
 
-The package extracts the following fields per event:
+The `Event` dataclass contains 23 fields per event:
 
-| Field | Description |
-|-------|-------------|
-| `title` | Event name |
-| `summary` | Short description |
-| `start_date` / `end_date` | Date in `YYYY-MM-DD` format |
-| `start_time` / `end_time` | Time in `HH:MM` format |
-| `timezone` | Event timezone |
-| `is_online` | Whether the event is virtual |
-| `venue_name` / `venue_address` | Physical location details |
-| `organizer_name` | Event organizer |
-| `url` | Eventbrite event page link |
-| `is_free` / `price` / `currency` | Pricing information |
-| `category` / `tags` | Event classification |
-| `image_url` | Event banner image |
+| Field | Type | Description |
+|-------|------|-------------|
+| `event_id` | `str` | Eventbrite event ID |
+| `title` | `str` | Event name |
+| `summary` | `str` | Short description |
+| `start_date` / `end_date` | `str` | Date in `YYYY-MM-DD` format |
+| `start_time` / `end_time` | `str` | Time in `HH:MM` format |
+| `timezone` | `str` | Event timezone (e.g. `America/New_York`) |
+| `is_online` | `bool` | Whether the event is virtual |
+| `venue_name` | `str` | Venue name |
+| `venue_address` | `str` | City, region, country (e.g. `New York, NY, US`) |
+| `organizer_name` / `organizer_id` | `str` | Event organizer details |
+| `url` | `str` | Eventbrite event page link |
+| `is_free` | `bool` | Whether the event is free |
+| `price` | `str` | Minimum ticket price |
+| `currency` | `str` | Price currency code (e.g. `USD`) |
+| `category` | `str` | Event category from Eventbrite tags |
+| `tags` | `list[str]` | Tag display names |
+| `image_url` | `str` | Event banner image URL |
+| `is_cancelled` | `bool` | Whether the event is cancelled |
+| `published` | `str` | Publication timestamp |
+| `source_platform` | `str` | Always `"eventbrite"` |
 
 ## Scope
 

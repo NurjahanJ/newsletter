@@ -6,12 +6,14 @@
 pytest tests/ -v
 ```
 
-The test suite covers:
+The test suite includes **62 tests** across 4 modules:
 
-- **Model tests** — Event creation, API response parsing, serialization
-- **Client tests** — Search, pagination, deduplication, location filtering
-- **Export tests** — JSON and CSV file output
-- **Transform tests** — Filtering, sorting, price/date formatting, classification, full pipeline
+| Module | Tests | Coverage |
+|--------|-------|----------|
+| `test_models.py` | 9 | Event creation, API response parsing, serialization |
+| `test_client.py` | 8 | Search, pagination, deduplication, location filtering |
+| `test_export.py` | 8 | JSON and CSV file output, empty lists, directory creation |
+| `test_transform.py` | 37 | Filtering, sorting, price/date formatting, classification, full pipeline |
 
 ## Linting and Formatting
 
