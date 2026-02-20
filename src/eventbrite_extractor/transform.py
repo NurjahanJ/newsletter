@@ -111,7 +111,11 @@ def filter_events(
                     )
                     continue
             except ValueError:
-                pass  # Keep events with unparseable dates
+                logger.warning(
+                    "Unparseable date '%s' for event: %s — keeping it.",
+                    event.start_date,
+                    event.title,
+                )
 
         result.append(event)
 
@@ -220,11 +224,11 @@ def classify_event(event: Event) -> str:
     Returns one of: Conference, Workshop, Meetup, Webinar, Hackathon,
     Talk, Course, or "Event" as a fallback.
     """
-    searchable = event.title.lower()
+    parts = [event.title.lower()]
     if event.summary:
-        searchable += " " + event.summary.lower()
-    for tag in event.tags:
-        searchable += " " + tag.lower()
+        parts.append(event.summary.lower())
+    parts.extend(tag.lower() for tag in event.tags)
+    searchable = " ".join(parts)
 
     for category, keywords in _CATEGORY_KEYWORDS.items():
         for keyword in keywords:

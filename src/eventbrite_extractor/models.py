@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -117,28 +117,4 @@ class Event:
 
     def to_dict(self) -> dict:
         """Convert the Event to a plain dictionary."""
-        return {
-            "event_id": self.event_id,
-            "title": self.title,
-            "summary": self.summary,
-            "start_date": self.start_date,
-            "start_time": self.start_time,
-            "end_date": self.end_date,
-            "end_time": self.end_time,
-            "timezone": self.timezone,
-            "is_online": self.is_online,
-            "venue_name": self.venue_name,
-            "venue_address": self.venue_address,
-            "organizer_name": self.organizer_name,
-            "organizer_id": self.organizer_id,
-            "url": self.url,
-            "is_free": self.is_free,
-            "price": self.price,
-            "currency": self.currency,
-            "category": self.category,
-            "tags": self.tags,
-            "image_url": self.image_url,
-            "is_cancelled": self.is_cancelled,
-            "published": self.published,
-            "source_platform": self.source_platform,
-        }
+        return asdict(self)

@@ -50,14 +50,15 @@ class EventbriteClient:
             }
         )
 
-    def _post(self, endpoint: str, body: dict) -> dict:
-        """Make a POST request to the Eventbrite API.
+    _MAX_RETRIES = 3
 
-        Handles rate limiting with exponential backoff.
+    def _request(self, method: str, endpoint: str, **kwargs) -> dict:
+        """Make an API request with rate-limit retry and exponential backoff.
 
         Args:
+            method: HTTP method ("GET" or "POST").
             endpoint: API endpoint path.
-            body: JSON request body.
+            **kwargs: Forwarded to ``requests.Session.request``.
 
         Returns:
             Parsed JSON response as a dict.
@@ -66,12 +67,12 @@ class EventbriteClient:
             requests.HTTPError: If the request fails after retries.
         """
         url = f"{BASE_URL}{endpoint}"
-        max_retries = 3
+        kwargs.setdefault("timeout", REQUEST_TIMEOUT)
 
-        for attempt in range(max_retries):
-            response = self._session.post(url, json=body, timeout=REQUEST_TIMEOUT)
+        for attempt in range(self._MAX_RETRIES + 1):
+            response = self._session.request(method, url, **kwargs)
 
-            if response.status_code == 429:
+            if response.status_code == 429 and attempt < self._MAX_RETRIES:
                 wait = int(response.headers.get("Retry-After", 2**attempt))
                 logger.warning("Rate limited. Retrying in %d seconds...", wait)
                 time.sleep(wait)
@@ -80,39 +81,16 @@ class EventbriteClient:
             response.raise_for_status()
             return response.json()
 
-        # Final attempt
-        response = self._session.post(url, json=body, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
+        # Unreachable, but keeps the type checker happy
+        raise RuntimeError("Exhausted retries")  # pragma: no cover
+
+    def _post(self, endpoint: str, body: dict) -> dict:
+        """POST to the Eventbrite API."""
+        return self._request("POST", endpoint, json=body)
 
     def _get(self, endpoint: str, params: dict | None = None) -> dict:
-        """Make a GET request to the Eventbrite API.
-
-        Args:
-            endpoint: API endpoint path.
-            params: Query parameters.
-
-        Returns:
-            Parsed JSON response as a dict.
-        """
-        url = f"{BASE_URL}{endpoint}"
-        max_retries = 3
-
-        for attempt in range(max_retries):
-            response = self._session.get(url, params=params, timeout=REQUEST_TIMEOUT)
-
-            if response.status_code == 429:
-                wait = int(response.headers.get("Retry-After", 2**attempt))
-                logger.warning("Rate limited. Retrying in %d seconds...", wait)
-                time.sleep(wait)
-                continue
-
-            response.raise_for_status()
-            return response.json()
-
-        response = self._session.get(url, params=params, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
+        """GET from the Eventbrite API."""
+        return self._request("GET", endpoint, params=params)
 
     def search_events(
         self,

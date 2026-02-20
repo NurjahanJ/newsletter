@@ -64,7 +64,7 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.post.return_value = mock_response
+        client._session.request.return_value = mock_response
 
         events = client.search_events(keyword="AI")
         assert len(events) == 1
@@ -91,7 +91,7 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.post.return_value = mock_response
+        client._session.request.return_value = mock_response
 
         events = client.search_events(keyword="AI")
         assert len(events) == 1
@@ -113,7 +113,7 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.post.return_value = mock_response
+        client._session.request.return_value = mock_response
 
         events = client.search_events(keyword="nonexistent")
         assert len(events) == 0
@@ -153,7 +153,7 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.post.side_effect = [mock_resp1, mock_resp2]
+        client._session.request.side_effect = [mock_resp1, mock_resp2]
 
         events = client.search_events(keyword="AI", max_pages=2)
         assert len(events) == 2
@@ -168,7 +168,7 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.get.return_value = mock_response
+        client._session.request.return_value = mock_response
 
         event = client.get_event_by_id("111")
         assert event.event_id == "111"
@@ -183,11 +183,11 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.post.return_value = mock_response
+        client._session.request.return_value = mock_response
 
         client.search_events(keyword="AI")
 
-        call_args = client._session.post.call_args
+        call_args = client._session.request.call_args
         body = call_args.kwargs.get("json") or call_args[1].get("json")
         assert "places" in body["event_search"]
         assert body["event_search"]["places"] == ["85977539"]
@@ -201,11 +201,11 @@ class TestEventbriteClient:
 
         client = self._make_client()
         client._session = MagicMock()
-        client._session.post.return_value = mock_response
+        client._session.request.return_value = mock_response
 
         client.search_events(keyword="AI", place_id=None)
 
-        call_args = client._session.post.call_args
+        call_args = client._session.request.call_args
         body = call_args.kwargs.get("json") or call_args[1].get("json")
         assert "places" not in body["event_search"]
 

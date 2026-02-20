@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from eventbrite_extractor.client import EventbriteClient
 from eventbrite_extractor.config import NYC_PLACE_ID
@@ -18,8 +19,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Run the event extraction pipeline."""
+# ---------------------------------------------------------------------------
+# CLI argument parsing
+# ---------------------------------------------------------------------------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Build and return the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Extract AI events from Eventbrite.",
     )
@@ -75,11 +81,71 @@ def main(argv: list[str] | None = None) -> None:
         default="output",
         help="Output directory (default: 'output/').",
     )
+    return parser
 
-    args = parser.parse_args(argv)
 
-    place_id = None if args.place_id.lower() == "none" else args.place_id
-    location_label = "NYC" if place_id == NYC_PLACE_ID else (place_id or "worldwide")
+def _resolve_location(place_id_arg: str) -> tuple[str | None, str]:
+    """Return (place_id, human-readable label) from the raw CLI value."""
+    if place_id_arg.lower() == "none":
+        return None, "worldwide"
+    if place_id_arg == NYC_PLACE_ID:
+        return place_id_arg, "NYC"
+    return place_id_arg, place_id_arg
+
+
+# ---------------------------------------------------------------------------
+# Export helpers
+# ---------------------------------------------------------------------------
+
+
+def _export_events(
+    enriched: list[dict],
+    output_dir: str,
+    fmt: str,
+) -> None:
+    """Write enriched event dicts to the requested file format(s)."""
+    out = Path(output_dir)
+    if fmt in ("json", "both"):
+        path = export_to_json(enriched, out / "events.json")
+        logger.info("JSON saved to %s", path)
+    if fmt in ("csv", "both"):
+        path = export_to_csv(enriched, out / "events.csv")
+        logger.info("CSV saved to %s", path)
+
+
+# ---------------------------------------------------------------------------
+# Terminal summary
+# ---------------------------------------------------------------------------
+
+
+def _print_summary(
+    enriched: list[dict],
+    raw_count: int,
+    location_label: str,
+) -> None:
+    """Print a human-readable event listing to stdout."""
+    print(f"\n{'=' * 64}")
+    print(f"  {len(enriched)} events in {location_label} (from {raw_count} raw)")
+    print(f"{'=' * 64}\n")
+
+    for i, ev in enumerate(enriched, 1):
+        print(f"  {i}. [{ev['event_type']}] {ev['title']}")
+        print(f"     {ev['display_date']}")
+        print(f"     {ev['display_location']}")
+        print(f"     {ev['display_price']}")
+        print(f"     {ev['url']}")
+        print()
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run the event extraction pipeline."""
+    args = _build_parser().parse_args(argv)
+    place_id, location_label = _resolve_location(args.place_id)
 
     logger.info(
         "Searching Eventbrite for '%s' events in %s (max %d pages)...",
@@ -88,8 +154,9 @@ def main(argv: list[str] | None = None) -> None:
         args.pages,
     )
 
+    # --- Extract ---
     client = EventbriteClient()
-    events = client.search_events(
+    raw_events = client.search_events(
         keyword=args.query,
         place_id=place_id,
         online_only=args.online_only,
@@ -97,15 +164,15 @@ def main(argv: list[str] | None = None) -> None:
         page_size=args.page_size,
     )
 
-    if not events:
+    if not raw_events:
         logger.warning("No events found for query '%s'.", args.query)
         sys.exit(0)
 
-    logger.info("Found %d raw events. Transforming...", len(events))
+    logger.info("Found %d raw events. Transforming...", len(raw_events))
 
     # --- Transform ---
     enriched = transform_events(
-        events,
+        raw_events,
         sort_by=args.sort_by,
         free_first=args.free_first,
     )
@@ -116,29 +183,11 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info("%d events after transform. Exporting...", len(enriched))
 
-    # --- Export ---
-    output_dir = args.output_dir
-    if args.format in ("json", "both"):
-        path = export_to_json(events, f"{output_dir}/events.json")
-        logger.info("JSON saved to %s", path)
-
-    if args.format in ("csv", "both"):
-        path = export_to_csv(events, f"{output_dir}/events.csv")
-        logger.info("CSV saved to %s", path)
+    # --- Export (enriched data, not raw) ---
+    _export_events(enriched, args.output_dir, args.format)
 
     # --- Print summary ---
-    print(f"\n{'=' * 64}")
-    print(f"  {len(enriched)} events in {location_label} (from {len(events)} raw)")
-    print(f"{'=' * 64}\n")
-
-    for i, ev in enumerate(enriched, 1):
-        tag = ev["event_type"]
-        print(f"  {i}. [{tag}] {ev['title']}")
-        print(f"     {ev['display_date']}")
-        print(f"     {ev['display_location']}")
-        print(f"     {ev['display_price']}")
-        print(f"     {ev['url']}")
-        print()
+    _print_summary(enriched, raw_count=len(raw_events), location_label=location_label)
 
 
 if __name__ == "__main__":
